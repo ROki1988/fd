@@ -15,7 +15,7 @@ use std::io::Write;
 use std::ops::Deref;
 #[cfg(target_family = "unix")]
 use std::os::unix::fs::PermissionsExt;
-use std::path::{Path, Component};
+use std::path::{Path, PathBuf, Component};
 use std::process;
 
 use clap::{App, AppSettings, Arg};
@@ -24,6 +24,7 @@ use regex::{Regex, RegexBuilder};
 use ignore::WalkBuilder;
 
 use lscolors::LsColors;
+use ansi_term::Style;
 
 /// Defines how to display search result paths.
 #[derive(PartialEq)]
@@ -73,12 +74,8 @@ static ROOT_DIR : &'static str = "/";
 /// Parent directory
 static PARENT_DIR : &'static str = "..";
 
-/// Print a search result to the console.
-fn print_entry(base: &Path, entry: &Path, config: &FdOptions) {
-    let path_full = base.join(entry);
-
-    let path_str = entry.to_string_lossy();
-
+/// Get color style from path. 
+fn get_style<'a>(component_path: &PathBuf, ls_colors: &'a LsColors) -> &'a Style {
     #[cfg(target_family = "unix")]
     let is_executable = |p: &std::path::PathBuf| {
         p.metadata()
@@ -90,9 +87,41 @@ fn print_entry(base: &Path, entry: &Path, config: &FdOptions) {
     #[cfg(not(target_family = "unix"))]
     let is_executable =  |p: &std::path::PathBuf| {false};
 
-    if let Some(ref ls_colors) = config.ls_colors {
-        let default_style = ansi_term::Style::default();
+    if component_path.symlink_metadata()
+                     .map(|md| md.file_type().is_symlink())
+                     .unwrap_or(false) {
+        &ls_colors.symlink
+    } else if component_path.is_dir() {
+        &ls_colors.directory
+    } else if is_executable(&component_path) {
+        &ls_colors.executable
+    } else {
+        // Look up file name
+        let o_style =
+            component_path.file_name()
+                          .and_then(|n| n.to_str())
+                          .and_then(|n| ls_colors.filenames.get(n));
 
+        match o_style {
+            Some(s) => s,
+            None =>
+                // Look up file extension
+                component_path.extension()
+                              .and_then(|e| e.to_str())
+                              .and_then(|e| ls_colors.extensions.get(e))
+                              .unwrap_or(&ls_colors.default_style)
+        }
+    }
+}
+
+/// Print a search result to the console.
+fn print_entry(base: &Path, entry: &Path, config: &FdOptions) {
+    let path_full = base.join(entry);
+
+    let path_str = entry.to_string_lossy();
+
+
+    if let Some(ref ls_colors) = config.ls_colors {
         let mut component_path = base.to_path_buf();
 
         if config.path_display == PathDisplay::Absolute {
@@ -109,32 +138,7 @@ fn print_entry(base: &Path, entry: &Path, config: &FdOptions) {
 
             component_path.push(Path::new(comp_str.deref()));
 
-            let style =
-                if component_path.symlink_metadata()
-                                 .map(|md| md.file_type().is_symlink())
-                                 .unwrap_or(false) {
-                    &ls_colors.symlink
-                } else if component_path.is_dir() {
-                    &ls_colors.directory
-                } else if is_executable(&component_path) {
-                    &ls_colors.executable
-                } else {
-                    // Look up file name
-                    let o_style =
-                        component_path.file_name()
-                                      .and_then(|n| n.to_str())
-                                      .and_then(|n| ls_colors.filenames.get(n));
-
-                    match o_style {
-                        Some(s) => s,
-                        None =>
-                            // Look up file extension
-                            component_path.extension()
-                                          .and_then(|e| e.to_str())
-                                          .and_then(|e| ls_colors.extensions.get(e))
-                                          .unwrap_or(&default_style)
-                    }
-                };
+            let style = get_style(&component_path, ls_colors);
 
             print!("{}", style.paint(comp_str));
 

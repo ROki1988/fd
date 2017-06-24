@@ -18,6 +18,9 @@ const LS_CODES: &'static [&'static str] =
 /// Defines how different file system entries should be colorized / styled.
 #[derive(Debug, PartialEq)]
 pub struct LsColors {
+    /// ANSI default Style 
+    pub default_style: Style,
+    
     /// ANSI Style for directories.
     pub directory: Style,
 
@@ -38,6 +41,7 @@ impl Default for LsColors {
     /// Get a default LsColors structure.
     fn default() -> LsColors {
         LsColors {
+            default_style: Style::default(),
             directory: Colour::Blue.bold(),
             symlink: Colour::Cyan.normal(),
             executable: Colour::Red.bold(),
